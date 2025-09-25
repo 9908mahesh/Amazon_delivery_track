@@ -2,10 +2,17 @@ import streamlit as st
 import pandas as pd
 import joblib
 import numpy as np
-from datetime import datetime
 
-# Load model
+# Load model and encoders
 model = joblib.load("lightgbm_tuned.pkl")
+feature_order = joblib.load("feature_order.pkl")
+
+# Load categorical encoders
+weather_enc = joblib.load("Weather_encoder.pkl")
+traffic_enc = joblib.load("Traffic_encoder.pkl")
+vehicle_enc = joblib.load("Vehicle_encoder.pkl")
+area_enc = joblib.load("Area_encoder.pkl")
+category_enc = joblib.load("Category_encoder.pkl")
 
 st.set_page_config(page_title="Amazon Delivery Time Predictor", layout="centered")
 
@@ -21,32 +28,51 @@ with st.form("input_form"):
     pickup_delay = st.number_input("Pickup Delay (minutes)", min_value=0.0, step=1.0)
     order_hour = st.slider("Order Hour (0-23)", 0, 23, 12)
     order_day = st.slider("Order Day (1-31)", 1, 31, 15)
-    order_weekday = st.selectbox("Order Weekday", [0,1,2,3,4,5,6], format_func=lambda x: ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][x])
+    order_weekday = st.selectbox("Order Weekday", [0,1,2,3,4,5,6], 
+                                 format_func=lambda x: ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][x])
     is_peak = st.checkbox("Peak Hour?")
     is_weekend = st.checkbox("Weekend?")
-    weather = st.selectbox("Weather", [0,1,2,3])   # encode same as training
-    traffic = st.selectbox("Traffic", [0,1,2,3])
-    vehicle = st.selectbox("Vehicle", [0,1,2])
-    area = st.selectbox("Area", [0,1,2])
-    category = st.selectbox("Category", [0,1,2])
+
+    # Raw category selections (match your training dataset categories!)
+    weather = st.selectbox("Weather", weather_enc.classes_)
+    traffic = st.selectbox("Traffic", traffic_enc.classes_)
+    vehicle = st.selectbox("Vehicle", vehicle_enc.classes_)
+    area = st.selectbox("Area", area_enc.classes_)
+    category = st.selectbox("Category", category_enc.classes_)
 
     submitted = st.form_submit_button("Predict")
 
 if submitted:
-    # Prepare input dataframe
-    input_data = pd.DataFrame([[
-        distance, pickup_delay, order_hour, order_day, order_weekday,
-        is_peak, is_weekend, 
-        np.digitize(distance, [0,2,5,10,20,50]),   # Distance_Bucket
-        traffic*distance,                          # Traffic_Distance
-        weather*pickup_delay,                      # Weather_Delay
-        weather, traffic, vehicle, area, category
-    ]], columns=[
-        "Distance_km","Pickup_Delay","Order_Hour","Order_Day","Order_Weekday",
-        "Is_Peak_Hour","Is_Weekend","Distance_Bucket","Traffic_Distance","Weather_Delay",
-        "Weather","Traffic","Vehicle","Area","Category"
-    ])
+    # Apply encoders
+    weather_val = weather_enc.transform([weather])[0]
+    traffic_val = traffic_enc.transform([traffic])[0]
+    vehicle_val = vehicle_enc.transform([vehicle])[0]
+    area_val = area_enc.transform([area])[0]
+    category_val = category_enc.transform([category])[0]
+
+    # Prepare input dict
+    input_dict = {
+        "Distance_km": distance,
+        "Pickup_Delay": pickup_delay,
+        "Order_Hour": order_hour,
+        "Order_Day": order_day,
+        "Order_Weekday": order_weekday,
+        "Is_Peak_Hour": int(is_peak),
+        "Is_Weekend": int(is_weekend),
+        "Distance_Bucket": np.digitize(distance, [0,2,5,10,20,50]),
+        "Traffic_Distance": traffic_val * distance,
+        "Weather_Delay": weather_val * pickup_delay,
+        "Weather": weather_val,
+        "Traffic": traffic_val,
+        "Vehicle": vehicle_val,
+        "Area": area_val,
+        "Category": category_val
+    }
+
+    # Convert to DataFrame and align feature order
+    input_df = pd.DataFrame([input_dict])
+    input_df = input_df[feature_order]
 
     # Prediction
-    prediction = model.predict(input_data)[0]
+    prediction = model.predict(input_df)[0]
     st.success(f"⏱️ Predicted Delivery Time: {prediction:.2f} minutes")
