@@ -28,12 +28,18 @@ with st.form("input_form"):
     pickup_delay = st.number_input("Pickup Delay (minutes)", min_value=0.0, step=1.0)
     order_hour = st.slider("Order Hour (0-23)", 0, 23, 12)
     order_day = st.slider("Order Day (1-31)", 1, 31, 15)
-    order_weekday = st.selectbox("Order Weekday", [0,1,2,3,4,5,6], 
-                                 format_func=lambda x: ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][x])
+    order_weekday = st.selectbox(
+        "Order Weekday", [0,1,2,3,4,5,6],
+        format_func=lambda x: ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][x]
+    )
     is_peak = st.checkbox("Peak Hour?")
     is_weekend = st.checkbox("Weekend?")
 
-    # Raw category selections (match your training dataset categories!)
+    # NEW: Agent details
+    agent_age = st.number_input("Agent Age", min_value=18, max_value=70, step=1)
+    agent_rating = st.slider("Agent Rating", 1.0, 5.0, 4.5, step=0.1)
+
+    # Raw category selections (match training dataset categories)
     weather = st.selectbox("Weather", weather_enc.classes_)
     traffic = st.selectbox("Traffic", traffic_enc.classes_)
     vehicle = st.selectbox("Vehicle", vehicle_enc.classes_)
@@ -59,6 +65,8 @@ if submitted:
         "Order_Weekday": order_weekday,
         "Is_Peak_Hour": int(is_peak),
         "Is_Weekend": int(is_weekend),
+        "Agent_Age": agent_age,
+        "Agent_Rating": agent_rating,
         "Distance_Bucket": np.digitize(distance, [0,2,5,10,20,50]),
         "Traffic_Distance": traffic_val * distance,
         "Weather_Delay": weather_val * pickup_delay,
@@ -71,7 +79,7 @@ if submitted:
 
     # Convert to DataFrame and align feature order
     input_df = pd.DataFrame([input_dict])
-    input_df = input_df[feature_order]
+    input_df = input_df[feature_order]  # ensures same order as training
 
     # Prediction
     prediction = model.predict(input_df)[0]
