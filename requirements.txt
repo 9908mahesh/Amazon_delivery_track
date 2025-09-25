@@ -6,4 +6,3 @@ lightgbm
 scikit-learn
 matplotlib
 seaborn
-xgboost shap
