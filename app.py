@@ -27,17 +27,20 @@ st.write("Predict delivery time (in minutes) based on order details or bulk data
 mode = st.sidebar.radio("Choose Mode:", ["Single Prediction", "Bulk CSV Upload", "Scenario Comparison"])
 
 # ==============================
-# Helper: Prepare input features
+# Helper: Prepare input features (safe encoding)
 # ==============================
 def prepare_input(distance, pickup_delay, order_hour, order_day, order_weekday,
                   is_peak, is_weekend, agent_age, agent_rating,
                   weather, traffic, vehicle, area, category):
 
-    weather_val = weather_enc.transform([weather])[0]
-    traffic_val = traffic_enc.transform([traffic])[0]
-    vehicle_val = vehicle_enc.transform([vehicle])[0]
-    area_val = area_enc.transform([area])[0]
-    category_val = category_enc.transform([category])[0]
+    def safe_single(encoder, value):
+        return encoder.transform([value])[0] if value in encoder.classes_ else -1
+
+    weather_val = safe_single(weather_enc, weather)
+    traffic_val = safe_single(traffic_enc, traffic)
+    vehicle_val = safe_single(vehicle_enc, vehicle)
+    area_val = safe_single(area_enc, area)
+    category_val = safe_single(category_enc, category)
 
     input_dict = {
         "Distance_km": distance,
