@@ -63,6 +63,13 @@ def prepare_input(distance, pickup_delay, order_hour, order_day, order_weekday,
     return input_df[feature_order]
 
 # ==============================
+# Helper: Safe categorical transform
+# ==============================
+def safe_transform(encoder, series):
+    """Safely transform categories. Unseen labels -> -1"""
+    return series.apply(lambda x: encoder.transform([x])[0] if x in encoder.classes_ else -1)
+
+# ==============================
 # Mode 1: Single Prediction
 # ==============================
 if mode == "Single Prediction":
@@ -129,12 +136,12 @@ elif mode == "Bulk CSV Upload":
         df = pd.read_csv(uploaded_file)
         st.write("Preview of uploaded data:", df.head())
 
-        # Encode categorical columns
-        df["Weather"] = weather_enc.transform(df["Weather"])
-        df["Traffic"] = traffic_enc.transform(df["Traffic"])
-        df["Vehicle"] = vehicle_enc.transform(df["Vehicle"])
-        df["Area"] = area_enc.transform(df["Area"])
-        df["Category"] = category_enc.transform(df["Category"])
+        # Encode categorical columns safely
+        df["Weather"] = safe_transform(weather_enc, df["Weather"])
+        df["Traffic"] = safe_transform(traffic_enc, df["Traffic"])
+        df["Vehicle"] = safe_transform(vehicle_enc, df["Vehicle"])
+        df["Area"] = safe_transform(area_enc, df["Area"])
+        df["Category"] = safe_transform(category_enc, df["Category"])
 
         # Add engineered features
         df["Distance_Bucket"] = np.digitize(df["Distance_km"], [0,2,5,10,20,50])
