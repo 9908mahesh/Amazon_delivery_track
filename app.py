@@ -3,6 +3,7 @@ import pandas as pd
 import joblib
 import numpy as np
 import io
+import mlflow
 
 # ==============================
 # Load Model + Encoders + Feature Order
@@ -63,7 +64,7 @@ def prepare_input(distance, pickup_delay, order_hour, order_day, order_weekday,
     }
 
     input_df = pd.DataFrame([input_dict])
-    return input_df[feature_order]
+    return input_df[feature_order], input_dict
 
 # ==============================
 # Helper: Safe categorical transform
@@ -100,12 +101,18 @@ if mode == "Single Prediction":
         submitted = st.form_submit_button("Predict")
 
     if submitted:
-        input_df = prepare_input(distance, pickup_delay, order_hour, order_day, order_weekday,
+        input_df, input_dict = prepare_input(distance, pickup_delay, order_hour, order_day, order_weekday,
                                  is_peak, is_weekend, agent_age, agent_rating,
                                  weather, traffic, vehicle, area, category)
 
         prediction = model.predict(input_df)[0]
         st.success(f"⏱️ Predicted Delivery Time: {prediction:.2f} minutes")
+
+        # Log to MLflow
+        with mlflow.start_run(nested=True):
+            mlflow.log_params(input_dict)
+            mlflow.log_metric("predicted_delivery_time", prediction)
+        st.info("📊 Prediction logged to MLflow ✅")
 
 # ==============================
 # Mode 2: Bulk CSV Upload
@@ -160,6 +167,12 @@ elif mode == "Bulk CSV Upload":
 
         st.download_button("📥 Download Predictions", df.to_csv(index=False), "predictions.csv", "text/csv")
 
+        # Log to MLflow
+        with mlflow.start_run(nested=True):
+            mlflow.log_metric("bulk_avg_prediction", preds.mean())
+            mlflow.log_param("num_records", len(df))
+        st.info("📊 Bulk predictions logged to MLflow ✅")
+
 # ==============================
 # Mode 3: Scenario Comparison
 # ==============================
@@ -173,11 +186,11 @@ elif mode == "Scenario Comparison":
     agent_age = st.slider("Agent Age", 18, 60, 30)
     agent_rating = st.slider("Agent Rating", 1.0, 5.0, 4.5, step=0.1)
 
-    base = prepare_input(distance, pickup_delay, order_hour, 15, 2, 0, 0,
+    base, base_dict = prepare_input(distance, pickup_delay, order_hour, 15, 2, 0, 0,
                          agent_age, agent_rating,
                          "Sunny", "Low", "Motorcycle", "Urban", "Food")
 
-    adverse = prepare_input(distance, pickup_delay, order_hour, 15, 2, 1, 0,
+    adverse, adverse_dict = prepare_input(distance, pickup_delay, order_hour, 15, 2, 1, 0,
                             agent_age, agent_rating,
                             "Rainy", "High", "Bicycle", "Urban", "Food")
 
@@ -187,3 +200,11 @@ elif mode == "Scenario Comparison":
     st.write(f"✅ **Favourable Conditions:** {base_pred:.2f} mins")
     st.write(f"⚠️ **Adverse Conditions:** {adverse_pred:.2f} mins")
     st.write(f"📊 **Difference:** {adverse_pred - base_pred:.2f} mins")
+
+    # Log to MLflow
+    with mlflow.start_run(nested=True):
+        mlflow.log_params({"scenario": "comparison"})
+        mlflow.log_metric("base_prediction", base_pred)
+        mlflow.log_metric("adverse_prediction", adverse_pred)
+        mlflow.log_metric("difference", adverse_pred - base_pred)
+    st.info("📊 Scenario comparison logged to MLflow ✅")
