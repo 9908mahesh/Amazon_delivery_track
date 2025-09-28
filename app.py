@@ -4,7 +4,6 @@ import joblib
 import numpy as np
 import io
 import mlflow
-import dagshub
 
 # ==============================
 # Load Model + Encoders + Feature Order
@@ -17,12 +16,6 @@ traffic_enc = joblib.load("Traffic_encoder.pkl")
 vehicle_enc = joblib.load("Vehicle_encoder.pkl")
 area_enc = joblib.load("Area_encoder.pkl")
 category_enc = joblib.load("Category_encoder.pkl")
-
-# ==============================
-# MLflow Setup
-# ==============================
-dagshub.init(repo_owner="9908mahesh", repo_name="Amazon_delivery_track", mlflow=True)
-mlflow.set_experiment("amazon_delivery_time_prediction")
 
 st.set_page_config(page_title="Amazon Delivery Time Predictor", layout="wide")
 
@@ -109,17 +102,17 @@ if mode == "Single Prediction":
 
     if submitted:
         input_df, input_dict = prepare_input(distance, pickup_delay, order_hour, order_day, order_weekday,
-                                             is_peak, is_weekend, agent_age, agent_rating,
-                                             weather, traffic, vehicle, area, category)
+                                 is_peak, is_weekend, agent_age, agent_rating,
+                                 weather, traffic, vehicle, area, category)
 
         prediction = model.predict(input_df)[0]
-
-        # ✅ Log prediction to MLflow
-        with mlflow.start_run(run_name="App_SinglePrediction"):
-            mlflow.log_params(input_dict)
-            mlflow.log_metrics({"predicted_delivery_time": float(prediction)})
-
         st.success(f"⏱️ Predicted Delivery Time: {prediction:.2f} minutes")
+
+        # Log to MLflow
+        with mlflow.start_run(nested=True):
+            mlflow.log_params(input_dict)
+            mlflow.log_metric("predicted_delivery_time", prediction)
+        st.info("📊 Prediction logged to MLflow ✅")
 
 # ==============================
 # Mode 2: Bulk CSV Upload
@@ -169,18 +162,16 @@ elif mode == "Bulk CSV Upload":
         preds = model.predict(df)
         df["Predicted_Delivery_Time"] = preds
 
-        # ✅ Log bulk predictions
-        with mlflow.start_run(run_name="App_BulkPrediction"):
-            mlflow.log_param("rows", len(df))
-            mlflow.log_metrics({
-                "mean_predicted_time": float(df["Predicted_Delivery_Time"].mean()),
-                "max_predicted_time": float(df["Predicted_Delivery_Time"].max())
-            })
-
         st.success("✅ Predictions Completed")
         st.write(df.head())
 
         st.download_button("📥 Download Predictions", df.to_csv(index=False), "predictions.csv", "text/csv")
+
+        # Log to MLflow
+        with mlflow.start_run(nested=True):
+            mlflow.log_metric("bulk_avg_prediction", preds.mean())
+            mlflow.log_param("num_records", len(df))
+        st.info("📊 Bulk predictions logged to MLflow ✅")
 
 # ==============================
 # Mode 3: Scenario Comparison
@@ -195,26 +186,25 @@ elif mode == "Scenario Comparison":
     agent_age = st.slider("Agent Age", 18, 60, 30)
     agent_rating = st.slider("Agent Rating", 1.0, 5.0, 4.5, step=0.1)
 
-    base, _ = prepare_input(distance, pickup_delay, order_hour, 15, 2, 0, 0,
-                            agent_age, agent_rating,
-                            "Sunny", "Low", "Motorcycle", "Urban", "Food")
+    base, base_dict = prepare_input(distance, pickup_delay, order_hour, 15, 2, 0, 0,
+                         agent_age, agent_rating,
+                         "Sunny", "Low", "Motorcycle", "Urban", "Food")
 
-    adverse, _ = prepare_input(distance, pickup_delay, order_hour, 15, 2, 1, 0,
-                               agent_age, agent_rating,
-                               "Rainy", "High", "Bicycle", "Urban", "Food")
+    adverse, adverse_dict = prepare_input(distance, pickup_delay, order_hour, 15, 2, 1, 0,
+                            agent_age, agent_rating,
+                            "Rainy", "High", "Bicycle", "Urban", "Food")
 
     base_pred = model.predict(base)[0]
     adverse_pred = model.predict(adverse)[0]
 
-    # ✅ Log scenario comparison
-    with mlflow.start_run(run_name="App_ScenarioComparison"):
-        mlflow.log_params({"scenario": "comparison"})
-        mlflow.log_metrics({
-            "favourable_time": float(base_pred),
-            "adverse_time": float(adverse_pred),
-            "difference": float(adverse_pred - base_pred)
-        })
-
     st.write(f"✅ **Favourable Conditions:** {base_pred:.2f} mins")
     st.write(f"⚠️ **Adverse Conditions:** {adverse_pred:.2f} mins")
     st.write(f"📊 **Difference:** {adverse_pred - base_pred:.2f} mins")
+
+    # Log to MLflow
+    with mlflow.start_run(nested=True):
+        mlflow.log_params({"scenario": "comparison"})
+        mlflow.log_metric("base_prediction", base_pred)
+        mlflow.log_metric("adverse_prediction", adverse_pred)
+        mlflow.log_metric("difference", adverse_pred - base_pred)
+    st.info("📊 Scenario comparison logged to MLflow ✅")
