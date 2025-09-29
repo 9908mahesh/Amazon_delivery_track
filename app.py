@@ -4,6 +4,15 @@ import joblib
 import numpy as np
 import io
 import mlflow
+import dagshub
+import traceback
+from datetime import datetime
+
+# --------------------------
+# DagsHub / MLflow init
+# --------------------------
+dagshub.init(repo_owner='9908mahesh', repo_name='Amazon_delivery_track', mlflow=True)
+mlflow.set_experiment("amazon_delivery_time_prediction")
 
 # ==============================
 # Load Model + Encoders + Feature Order
@@ -23,17 +32,29 @@ st.title("📦 Amazon Delivery Time Prediction")
 st.write("Predict delivery time (in minutes) based on order details or bulk data.")
 
 # ==============================
-# Sidebar Mode Selection
+# Helper functions
 # ==============================
-mode = st.sidebar.radio("Choose Mode:", ["Single Prediction", "Bulk CSV Upload", "Scenario Comparison"])
+def sanitize_for_mlflow(d: dict):
+    """Convert numpy types to native Python types and everything else to str."""
+    out = {}
+    for k, v in d.items():
+        try:
+            if isinstance(v, (np.integer,)):
+                out[k] = int(v)
+            elif isinstance(v, (np.floating,)):
+                out[k] = float(v)
+            elif isinstance(v, (int, float, str, bool)):
+                out[k] = v
+            else:
+                out[k] = str(v)
+        except Exception:
+            out[k] = str(v)
+    return out
 
-# ==============================
-# Helper: Prepare input features (safe encoding)
-# ==============================
 def prepare_input(distance, pickup_delay, order_hour, order_day, order_weekday,
                   is_peak, is_weekend, agent_age, agent_rating,
                   weather, traffic, vehicle, area, category):
-
+    """Prepare a single-row DataFrame in the feature order and return input_dict for logging."""
     def safe_single(encoder, value):
         return encoder.transform([value])[0] if value in encoder.classes_ else -1
 
@@ -53,7 +74,7 @@ def prepare_input(distance, pickup_delay, order_hour, order_day, order_weekday,
         "Is_Weekend": int(is_weekend),
         "Agent_Age": agent_age,
         "Agent_Rating": agent_rating,
-        "Distance_Bucket": np.digitize(distance, [0,2,5,10,20,50]),
+        "Distance_Bucket": int(np.digitize(distance, [0,2,5,10,20,50])),
         "Traffic_Distance": traffic_val * distance,
         "Weather_Delay": weather_val * pickup_delay,
         "Weather": weather_val,
@@ -64,14 +85,29 @@ def prepare_input(distance, pickup_delay, order_hour, order_day, order_weekday,
     }
 
     input_df = pd.DataFrame([input_dict])
-    return input_df[feature_order], input_dict
+    # ensure columns exist in the same order as training (if any missing this will be checked by caller)
+    return input_df, input_dict
 
-# ==============================
-# Helper: Safe categorical transform
-# ==============================
 def safe_transform(encoder, series):
     """Safely transform categories. Unseen labels -> -1"""
-    return series.apply(lambda x: encoder.transform([x])[0] if x in encoder.classes_ else -1)
+    # Normalize strings a bit (strip). Keep membership check case-sensitive to match encoders.
+    s = series.astype(str).str.strip()
+    return s.apply(lambda x: encoder.transform([x])[0] if x in encoder.classes_ else -1)
+
+def ensure_and_align_features(df, feature_order, fill_value=0):
+    """Make sure df contains all features in feature_order. Fill missing with fill_value and align order."""
+    missing = [c for c in feature_order if c not in df.columns]
+    if missing:
+        st.warning(f"Uploaded data missing features {missing}. Filling with default={fill_value}.")
+        for c in missing:
+            df[c] = fill_value
+    # reorder
+    return df[feature_order]
+
+# ==============================
+# Sidebar Mode Selection
+# ==============================
+mode = st.sidebar.radio("Choose Mode:", ["Single Prediction", "Bulk CSV Upload", "Scenario Comparison"])
 
 # ==============================
 # Mode 1: Single Prediction
@@ -102,17 +138,28 @@ if mode == "Single Prediction":
 
     if submitted:
         input_df, input_dict = prepare_input(distance, pickup_delay, order_hour, order_day, order_weekday,
-                                 is_peak, is_weekend, agent_age, agent_rating,
-                                 weather, traffic, vehicle, area, category)
+                                             is_peak, is_weekend, agent_age, agent_rating,
+                                             weather, traffic, vehicle, area, category)
+        # align columns — safe guard
+        try:
+            input_df = ensure_and_align_features(input_df, feature_order)
+        except Exception as e:
+            st.error(f"Feature alignment error: {e}")
+            raise
 
         prediction = model.predict(input_df)[0]
         st.success(f"⏱️ Predicted Delivery Time: {prediction:.2f} minutes")
 
-        # Log to MLflow
-        with mlflow.start_run(nested=True):
-            mlflow.log_params(input_dict)
-            mlflow.log_metric("predicted_delivery_time", prediction)
-        st.info("📊 Prediction logged to MLflow ✅")
+        # Log to MLflow safely
+        try:
+            run_name = "App_SinglePrediction"
+            with mlflow.start_run(run_name=run_name):
+                mlflow.log_params(sanitize_for_mlflow(input_dict))
+                mlflow.log_metric("predicted_delivery_time", float(prediction))
+            st.info("📊 Prediction logged to MLflow ✅")
+        except Exception as e:
+            st.warning("MLflow logging failed (prediction saved locally only).")
+            st.write(str(e))
 
 # ==============================
 # Mode 2: Bulk CSV Upload
@@ -147,18 +194,28 @@ elif mode == "Bulk CSV Upload":
         st.write("Preview of uploaded data:", df.head())
 
         # Encode categorical columns safely
-        df["Weather"] = safe_transform(weather_enc, df["Weather"])
-        df["Traffic"] = safe_transform(traffic_enc, df["Traffic"])
-        df["Vehicle"] = safe_transform(vehicle_enc, df["Vehicle"])
-        df["Area"] = safe_transform(area_enc, df["Area"])
-        df["Category"] = safe_transform(category_enc, df["Category"])
+        try:
+            df["Weather"] = safe_transform(weather_enc, df["Weather"])
+            df["Traffic"] = safe_transform(traffic_enc, df["Traffic"])
+            df["Vehicle"] = safe_transform(vehicle_enc, df["Vehicle"])
+            df["Area"] = safe_transform(area_enc, df["Area"])
+            df["Category"] = safe_transform(category_enc, df["Category"])
+        except KeyError as e:
+            st.error(f"Uploaded CSV missing expected column: {e}")
+            st.stop()
 
         # Add engineered features
-        df["Distance_Bucket"] = np.digitize(df["Distance_km"], [0,2,5,10,20,50])
+        df["Distance_Bucket"] = np.digitize(df["Distance_km"], [0,2,5,10,20,50]).astype(int)
         df["Traffic_Distance"] = df["Traffic"] * df["Distance_km"]
         df["Weather_Delay"] = df["Weather"] * df["Pickup_Delay"]
 
-        df = df[feature_order]
+        # align features and handle missing columns
+        try:
+            df = ensure_and_align_features(df, feature_order, fill_value=0)
+        except Exception as e:
+            st.error(f"Feature alignment error: {e}")
+            st.stop()
+
         preds = model.predict(df)
         df["Predicted_Delivery_Time"] = preds
 
@@ -167,11 +224,17 @@ elif mode == "Bulk CSV Upload":
 
         st.download_button("📥 Download Predictions", df.to_csv(index=False), "predictions.csv", "text/csv")
 
-        # Log to MLflow
-        with mlflow.start_run(nested=True):
-            mlflow.log_metric("bulk_avg_prediction", preds.mean())
-            mlflow.log_param("num_records", len(df))
-        st.info("📊 Bulk predictions logged to MLflow ✅")
+        # Log to MLflow (summary)
+        try:
+            run_name = f"App_BulkPrediction_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            with mlflow.start_run(run_name=run_name):
+                mlflow.log_param("num_records", int(len(df)))
+                mlflow.log_metric("bulk_avg_prediction", float(df["Predicted_Delivery_Time"].mean()))
+                mlflow.log_metric("bulk_max_prediction", float(df["Predicted_Delivery_Time"].max()))
+            st.info("📊 Bulk predictions logged to MLflow ✅")
+        except Exception as e:
+            st.warning("MLflow logging failed for bulk prediction.")
+            st.write(str(e))
 
 # ==============================
 # Mode 3: Scenario Comparison
@@ -186,25 +249,36 @@ elif mode == "Scenario Comparison":
     agent_age = st.slider("Agent Age", 18, 60, 30)
     agent_rating = st.slider("Agent Rating", 1.0, 5.0, 4.5, step=0.1)
 
-    base, base_dict = prepare_input(distance, pickup_delay, order_hour, 15, 2, 0, 0,
-                         agent_age, agent_rating,
-                         "Sunny", "Low", "Motorcycle", "Urban", "Food")
+    base_df, base_dict = prepare_input(distance, pickup_delay, order_hour, 15, 2, 0, 0,
+                                       agent_age, agent_rating,
+                                       weather_enc.classes_[0], traffic_enc.classes_[0],
+                                       vehicle_enc.classes_[0], area_enc.classes_[0], category_enc.classes_[0])
 
-    adverse, adverse_dict = prepare_input(distance, pickup_delay, order_hour, 15, 2, 1, 0,
-                            agent_age, agent_rating,
-                            "Rainy", "High", "Bicycle", "Urban", "Food")
+    adverse_df, adverse_dict = prepare_input(distance, pickup_delay, order_hour, 15, 2, 1, 0,
+                                             agent_age, agent_rating,
+                                             weather_enc.classes_[-1], traffic_enc.classes_[-1],
+                                             vehicle_enc.classes_[-1], area_enc.classes_[0], category_enc.classes_[0])
 
-    base_pred = model.predict(base)[0]
-    adverse_pred = model.predict(adverse)[0]
+    # Align (should be fine)
+    base_df = ensure_and_align_features(base_df, feature_order)
+    adverse_df = ensure_and_align_features(adverse_df, feature_order)
+
+    base_pred = model.predict(base_df)[0]
+    adverse_pred = model.predict(adverse_df)[0]
 
     st.write(f"✅ **Favourable Conditions:** {base_pred:.2f} mins")
     st.write(f"⚠️ **Adverse Conditions:** {adverse_pred:.2f} mins")
     st.write(f"📊 **Difference:** {adverse_pred - base_pred:.2f} mins")
 
     # Log to MLflow
-    with mlflow.start_run(nested=True):
-        mlflow.log_params({"scenario": "comparison"})
-        mlflow.log_metric("base_prediction", base_pred)
-        mlflow.log_metric("adverse_prediction", adverse_pred)
-        mlflow.log_metric("difference", adverse_pred - base_pred)
-    st.info("📊 Scenario comparison logged to MLflow ✅")
+    try:
+        run_name = "App_ScenarioComparison"
+        with mlflow.start_run(run_name=run_name):
+            mlflow.log_params({"scenario": "comparison"})
+            mlflow.log_metric("favourable_time", float(base_pred))
+            mlflow.log_metric("adverse_time", float(adverse_pred))
+            mlflow.log_metric("difference", float(adverse_pred - base_pred))
+        st.info("📊 Scenario comparison logged to MLflow ✅")
+    except Exception as e:
+        st.warning("MLflow logging failed for scenario.")
+        st.write(str(e))
