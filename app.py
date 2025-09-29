@@ -11,8 +11,16 @@ from datetime import datetime
 # --------------------------
 # DagsHub / MLflow init
 # --------------------------
-dagshub.init(repo_owner='9908mahesh', repo_name='Amazon_delivery_track', mlflow=True)
-mlflow.set_experiment("amazon_delivery_time_prediction")
+import dagshub
+import os
+
+dagshub.init(
+    repo_owner=os.getenv("DAGSHUB_USER"),
+    repo_name="Amazon_delivery_track",
+    mlflow=True,
+    token=os.getenv("DAGSHUB_TOKEN")
+)
+
 
 # ==============================
 # Load Model + Encoders + Feature Order
