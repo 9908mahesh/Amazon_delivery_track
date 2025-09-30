@@ -72,8 +72,8 @@ mode = st.sidebar.radio("Choose Mode:", ["Single Prediction", "Bulk CSV Upload",
 # Helper: Prepare input features (safe encoding)
 # ==============================
 def prepare_input(distance, pickup_delay, order_hour, order_day, order_weekday,
-                  is_peak, is_weekend, agent_age, agent_rating,
-                  weather, traffic, vehicle, area, category):
+                  is_peak, is_weekend, agent_age, agent_rating,
+                  weather, traffic, vehicle, area, category):
 
     def safe_single(encoder, value):
         return encoder.transform([value])[0] if value in encoder.classes_ else -1
