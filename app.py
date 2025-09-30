@@ -5,6 +5,7 @@ import numpy as np
 import io
 import mlflow
 import dagshub
+import os
 
 # ==============================
 # DagsHub / MLflow Init
@@ -20,6 +21,13 @@ try:
         token=DAGSHUB_TOKEN
     )
     mlflow.set_experiment("Amazon Delivery Prediction")
+
+    # 🔍 Test logging
+    with mlflow.start_run(nested=True):
+        mlflow.log_param("test_param", "ok")
+        mlflow.log_metric("test_metric", 1)
+    st.success("✅ Connected to DagsHub MLflow. Test log saved.")
+
     DAGSHUB_OK = True
 except Exception as e:
     st.warning("⚠️ Could not connect to DagsHub MLflow. Logs will not be saved.")
@@ -38,7 +46,6 @@ area_enc = joblib.load("Area_encoder.pkl")
 category_enc = joblib.load("Category_encoder.pkl")
 
 st.set_page_config(page_title="Amazon Delivery Time Predictor", layout="wide")
-
 st.title("📦 Amazon Delivery Time Prediction")
 st.write("Predict delivery time (in minutes) based on order details or bulk data.")
 
@@ -132,7 +139,7 @@ if mode == "Single Prediction":
             with mlflow.start_run(nested=True):
                 mlflow.log_params(input_dict)
                 mlflow.log_metric("predicted_delivery_time", prediction)
-            st.info("📊 Logs saved to DagsHub MLflow ✅")
+            st.info("📊 Prediction logged to DagsHub MLflow ✅")
 
 # ==============================
 # Mode 2: Bulk CSV Upload
@@ -140,7 +147,6 @@ if mode == "Single Prediction":
 elif mode == "Bulk CSV Upload":
     st.subheader("Upload a CSV file with order details")
 
-    # Generate and offer sample CSV for download
     sample_csv = pd.DataFrame([{
         "Distance_km": 5,
         "Pickup_Delay": 15,
@@ -166,14 +172,12 @@ elif mode == "Bulk CSV Upload":
         df = pd.read_csv(uploaded_file)
         st.write("Preview of uploaded data:", df.head())
 
-        # Encode categorical columns safely
         df["Weather"] = safe_transform(weather_enc, df["Weather"])
         df["Traffic"] = safe_transform(traffic_enc, df["Traffic"])
         df["Vehicle"] = safe_transform(vehicle_enc, df["Vehicle"])
         df["Area"] = safe_transform(area_enc, df["Area"])
         df["Category"] = safe_transform(category_enc, df["Category"])
 
-        # Add engineered features
         df["Distance_Bucket"] = np.digitize(df["Distance_km"], [0,2,5,10,20,50])
         df["Traffic_Distance"] = df["Traffic"] * df["Distance_km"]
         df["Weather_Delay"] = df["Weather"] * df["Pickup_Delay"]
@@ -191,7 +195,7 @@ elif mode == "Bulk CSV Upload":
             with mlflow.start_run(nested=True):
                 mlflow.log_metric("bulk_avg_prediction", preds.mean())
                 mlflow.log_param("num_records", len(df))
-            st.info("📊 Logs saved to DagsHub MLflow ✅")
+            st.info("📊 Bulk predictions logged to DagsHub MLflow ✅")
 
 # ==============================
 # Mode 3: Scenario Comparison
@@ -206,11 +210,11 @@ elif mode == "Scenario Comparison":
     agent_age = st.slider("Agent Age", 18, 60, 30)
     agent_rating = st.slider("Agent Rating", 1.0, 5.0, 4.5, step=0.1)
 
-    base, base_dict = prepare_input(distance, pickup_delay, order_hour, 15, 2, 0, 0,
+    base, _ = prepare_input(distance, pickup_delay, order_hour, 15, 2, 0, 0,
                          agent_age, agent_rating,
                          "Sunny", "Low", "Motorcycle", "Urban", "Food")
 
-    adverse, adverse_dict = prepare_input(distance, pickup_delay, order_hour, 15, 2, 1, 0,
+    adverse, _ = prepare_input(distance, pickup_delay, order_hour, 15, 2, 1, 0,
                             agent_age, agent_rating,
                             "Rainy", "High", "Bicycle", "Urban", "Food")
 
@@ -227,4 +231,4 @@ elif mode == "Scenario Comparison":
             mlflow.log_metric("base_prediction", base_pred)
             mlflow.log_metric("adverse_prediction", adverse_pred)
             mlflow.log_metric("difference", adverse_pred - base_pred)
-        st.info("📊 Logs saved to DagsHub MLflow ✅")
+        st.info("📊 Scenario comparison logged to DagsHub MLflow ✅")
