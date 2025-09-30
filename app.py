@@ -13,13 +13,27 @@ import os
 try:
     DAGSHUB_USER = st.secrets["DAGSHUB_USER"]
     DAGSHUB_TOKEN = st.secrets["DAGSHUB_TOKEN"]
-
+    REPO_NAME = "Amazon_delivery_track"
+    
+    # --- Explicit DagsHub/MLflow Setup ---
+    # 1. Set DagsHub credentials as OS environment variables
+    os.environ['DAGSHUB_USER'] = DAGSHUB_USER
+    os.environ['DAGSHUB_PASSWORD'] = DAGSHUB_TOKEN # Use token as password
+    
+    # 2. Initialize DagsHub 
     dagshub.init(
         repo_owner=DAGSHUB_USER,
-        repo_name="Amazon_delivery_track",
-        mlflow=True,
-        token=DAGSHUB_TOKEN
+        repo_name=REPO_NAME,
+        mlflow=True, # This automatically sets MLFLOW_TRACKING_URI
+        token=DAGSHUB_TOKEN # While init sets the URI, including token is good practice
     )
+    
+    # Optional but recommended: Explicitly set the tracking URI again
+    # The format is: https://dagshub.com/<repo_owner>/<repo_name>.mlflow
+    MLFLOW_TRACKING_URI = f"https://dagshub.com/9908mahesh/Amazon_delivery_track.mlflow"
+    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+    # --------------------------------------
+
     mlflow.set_experiment("Amazon Delivery Prediction")
 
     # 🔍 Test logging
@@ -30,7 +44,7 @@ try:
 
     DAGSHUB_OK = True
 except Exception as e:
-    st.warning("⚠️ Could not connect to DagsHub MLflow. Logs will not be saved.")
+    st.warning(f"⚠️ Could not connect to DagsHub MLflow. Logs will not be saved. Error: {e}")
     DAGSHUB_OK = False
 
 # ==============================
